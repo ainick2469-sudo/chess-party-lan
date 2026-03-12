@@ -1,0 +1,6 @@
+node_modules
+dist
+release
+playwright-report
+test-results
+.tools/node-v22.22.1-win-x64.zip
