@@ -119,8 +119,22 @@ export interface PlayerPresence {
   seatColor?: Color;
 }
 
+export interface PublicLobbySummary {
+  lobbyId: string;
+  title: string;
+  hostName: string;
+  variant: VariantId;
+  phase: RoomPhase;
+  seatsFilled: number;
+  seatsMax: number;
+  createdAt: number;
+  locked: boolean;
+}
+
 export interface RoomState {
-  roomCode: string;
+  lobbyId: string;
+  title: string;
+  isPublic: boolean;
   createdAt: number;
   hostPlayerId: string;
   phase: RoomPhase;
@@ -172,7 +186,8 @@ export interface SessionInfo {
   sessionToken: string;
   playerId?: string;
   playerName?: string;
-  roomCode?: string;
+  lobbyId?: string;
+  hostJoinPin?: string;
 }
 
 export interface ServerPrompt {
@@ -187,13 +202,18 @@ export type ClientMessage =
   | {
       type: 'create_room';
       playerName: string;
+      roomTitle: string;
       sessionToken?: string;
     }
   | {
       type: 'join_room';
       playerName: string;
-      roomCode: string;
+      lobbyId: string;
+      joinPin?: string;
       sessionToken?: string;
+    }
+  | {
+      type: 'subscribe_lobbies';
     }
   | {
       type: 'update_settings';
@@ -214,6 +234,9 @@ export type ClientMessage =
       type: 'request_takeback';
     }
   | {
+      type: 'regenerate_pin';
+    }
+  | {
       type: 'respond_takeback';
       promptId: string;
       accept: boolean;
@@ -229,6 +252,10 @@ export type ClientMessage =
     };
 
 export type ServerMessage =
+  | {
+      type: 'lobby_list';
+      lobbies: PublicLobbySummary[];
+    }
   | {
       type: 'session';
       session: SessionInfo;

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import type { Color } from 'chessops/types';
 import { WebSocket } from 'ws';
@@ -14,6 +14,7 @@ import {
   type ClientMessage,
   type GameSnapshot,
   type LobbySettings,
+  type PublicLobbySummary,
   type RematchOption,
   type RoomState,
   type ServerMessage,
@@ -21,7 +22,11 @@ import {
 } from '../../shared/src';
 
 const RECONNECT_WINDOW_MS = 60_000;
-const ROOM_CODE_ATTEMPTS = 500;
+const ROOM_ID_ATTEMPTS = 500;
+const PIN_ATTEMPT_LIMIT = 3;
+const PIN_COOLDOWN_MS = 30_000;
+const LOBBY_ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const LOBBY_ID_LENGTH = 6;
 const VARIANT_ROTATION: LobbySettings['variant'][] = [
   'standard',
   'chess960',
@@ -57,30 +62,53 @@ interface MatchState {
 }
 
 interface InternalRoom {
-  roomCode: string;
+  lobbyId: string;
+  title: string;
   createdAt: number;
   hostPlayerId: string;
   phase: RoomState['phase'];
   settings: LobbySettings;
   players: InternalPlayer[];
+  joinPinHash: string;
+  joinPinSalt: string;
   game?: MatchState;
   pendingTakeback?: ServerPrompt;
   pendingRematch?: ServerPrompt;
+}
+
+interface SocketMeta {
+  address: string;
+}
+
+interface PinAttemptState {
+  count: number;
+  blockedUntil?: number;
 }
 
 export class ClientFacingError extends Error {}
 
 export class RoomManager {
   private readonly rooms = new Map<string, InternalRoom>();
-  private readonly socketIndex = new Map<WebSocket, { roomCode: string; playerId: string }>();
+  private readonly socketIndex = new Map<WebSocket, { lobbyId: string; playerId: string }>();
+  private readonly socketMeta = new Map<WebSocket, SocketMeta>();
+  private readonly pinAttempts = new Map<string, PinAttemptState>();
 
-  createRoom(playerName: string, socket: WebSocket, sessionToken?: string) {
+  registerSocket(socket: WebSocket, address: string) {
+    this.socketMeta.set(socket, { address });
+    this.sendLobbyList(socket);
+  }
+
+  createRoom(playerName: string, roomTitle: string, socket: WebSocket, sessionToken?: string) {
     const normalizedName = sanitizeName(playerName);
-    const roomCode = this.generateRoomCode();
+    const title = sanitizeRoomTitle(roomTitle);
+    const lobbyId = this.generateLobbyId();
     const playerId = randomUUID();
     const token = sessionToken && sessionToken.trim() ? sessionToken : randomUUID();
+    const joinPin = generateJoinPin();
+    const joinPinSalt = randomBytes(8).toString('hex');
     const room: InternalRoom = {
-      roomCode,
+      lobbyId,
+      title,
       createdAt: Date.now(),
       hostPlayerId: playerId,
       phase: 'lobby',
@@ -95,17 +123,20 @@ export class RoomManager {
           sessionToken: token,
           socket
         }
-      ]
+      ],
+      joinPinSalt,
+      joinPinHash: hashJoinPin(joinPin, joinPinSalt)
     };
 
-    this.rooms.set(roomCode, room);
-    this.socketIndex.set(socket, { roomCode, playerId });
-    this.pushSession(room, room.players[0]);
+    this.rooms.set(lobbyId, room);
+    this.socketIndex.set(socket, { lobbyId, playerId });
+    this.pushSession(room, room.players[0], joinPin);
     this.broadcastRoom(room);
+    this.broadcastLobbyList();
   }
 
-  joinRoom(roomCode: string, playerName: string, socket: WebSocket, sessionToken?: string) {
-    const room = this.mustGetRoom(roomCode);
+  joinRoom(lobbyId: string, playerName: string, socket: WebSocket, sessionToken?: string, joinPin?: string) {
+    const room = this.mustGetRoom(lobbyId);
     const normalizedName = sanitizeName(playerName);
     const existing = sessionToken ? room.players.find((player) => player.sessionToken === sessionToken) : undefined;
 
@@ -114,16 +145,31 @@ export class RoomManager {
       existing.connected = true;
       existing.disconnectedAt = undefined;
       existing.socket = socket;
-      this.socketIndex.set(socket, { roomCode: room.roomCode, playerId: existing.id });
+      this.socketIndex.set(socket, { lobbyId: room.lobbyId, playerId: existing.id });
       this.pushSession(room, existing);
       this.broadcastRoom(room);
       if (room.game) this.broadcastGame(room);
+      this.broadcastLobbyList();
       return;
+    }
+
+    if (room.phase !== 'lobby') {
+      throw new ClientFacingError('That lobby is no longer open for new players.');
     }
 
     if (room.players.length >= 2) {
       throw new ClientFacingError('That lobby is already full.');
     }
+
+    const address = this.socketMeta.get(socket)?.address ?? 'unknown';
+    this.assertPinAllowed(room.lobbyId, address);
+
+    if (!joinPin || !this.matchesJoinPin(room, joinPin)) {
+      this.recordPinFailure(room.lobbyId, address);
+      throw new ClientFacingError('That 4-digit PIN does not unlock this lobby.');
+    }
+
+    this.clearPinFailures(room.lobbyId, address);
 
     const playerId = randomUUID();
     const token = sessionToken && sessionToken.trim() ? sessionToken : randomUUID();
@@ -138,19 +184,23 @@ export class RoomManager {
     };
 
     room.players.push(player);
-    this.socketIndex.set(socket, { roomCode: room.roomCode, playerId: player.id });
+    this.socketIndex.set(socket, { lobbyId: room.lobbyId, playerId: player.id });
     this.pushSession(room, player);
     this.broadcastRoom(room);
+    this.broadcastLobbyList();
     if (room.game) this.broadcastGame(room);
   }
 
   handleMessage(socket: WebSocket, message: ClientMessage) {
     switch (message.type) {
+      case 'subscribe_lobbies':
+        this.sendLobbyList(socket);
+        return;
       case 'create_room':
-        this.createRoom(message.playerName, socket, message.sessionToken);
+        this.createRoom(message.playerName, message.roomTitle, socket, message.sessionToken);
         return;
       case 'join_room':
-        this.joinRoom(message.roomCode, message.playerName, socket, message.sessionToken);
+        this.joinRoom(message.lobbyId, message.playerName, socket, message.sessionToken, message.joinPin);
         return;
       default:
         break;
@@ -158,15 +208,15 @@ export class RoomManager {
 
     const context = this.socketIndex.get(socket);
     if (!context) {
-      throw new ClientFacingError('You need to create or join a room first.');
+      throw new ClientFacingError('You need to create or join a lobby first.');
     }
 
-    const room = this.mustGetRoom(context.roomCode);
+    const room = this.mustGetRoom(context.lobbyId);
     const player = this.mustGetPlayer(room, context.playerId);
 
     switch (message.type) {
       case 'update_settings':
-        this.updateSettings(room, player.id, message.settings);
+        this.updateSettings(room, message.settings);
         return;
       case 'set_ready':
         this.setReady(room, player.id, message.ready);
@@ -180,6 +230,9 @@ export class RoomManager {
       case 'request_takeback':
         this.requestTakeback(room, player.id);
         return;
+      case 'regenerate_pin':
+        this.regeneratePin(room, player.id);
+        return;
       case 'respond_takeback':
         this.respondTakeback(room, player.id, message.promptId, message.accept);
         return;
@@ -187,7 +240,7 @@ export class RoomManager {
         this.handleRematch(room, player.id, message.option, message.action ?? 'request', message.promptId);
         return;
       case 'leave_room':
-        this.leaveRoom(room, player.id, 'Player left the room.');
+        this.leaveRoom(room, player.id, 'Player left the lobby.');
         return;
       default:
         return;
@@ -196,10 +249,12 @@ export class RoomManager {
 
   handleDisconnect(socket: WebSocket) {
     const context = this.socketIndex.get(socket);
+    this.socketIndex.delete(socket);
+    this.socketMeta.delete(socket);
+
     if (!context) return;
 
-    this.socketIndex.delete(socket);
-    const room = this.rooms.get(context.roomCode);
+    const room = this.rooms.get(context.lobbyId);
     if (!room) return;
 
     const player = room.players.find((entry) => entry.id === context.playerId);
@@ -214,17 +269,20 @@ export class RoomManager {
 
   shutdown() {
     for (const room of this.rooms.values()) {
-      this.broadcast(room, { type: 'room_closed', message: 'The host server shut down.' });
+      this.broadcast(room, { type: 'room_closed', message: 'The hosted server shut down.' });
     }
     this.rooms.clear();
     this.socketIndex.clear();
+    this.socketMeta.clear();
+    this.pinAttempts.clear();
   }
 
   tick() {
     const now = Date.now();
 
     for (const room of [...this.rooms.values()]) {
-      this.expireDisconnectedPlayers(room, now);
+      const removed = this.expireDisconnectedPlayers(room, now);
+      if (removed) continue;
 
       if (!room.game || room.phase !== 'playing') continue;
 
@@ -251,6 +309,7 @@ export class RoomManager {
         };
         this.broadcastRoom(room);
         this.broadcastGame(room);
+        this.broadcastLobbyList();
         continue;
       }
 
@@ -262,7 +321,7 @@ export class RoomManager {
     }
   }
 
-  private updateSettings(room: InternalRoom, playerId: string, patch: Partial<LobbySettings>) {
+  private updateSettings(room: InternalRoom, patch: Partial<LobbySettings>) {
     if (room.phase !== 'lobby') {
       throw new ClientFacingError('Settings can only be changed while the game is in the lobby.');
     }
@@ -275,6 +334,7 @@ export class RoomManager {
       player.ready = false;
     });
     this.broadcastRoom(room);
+    this.broadcastLobbyList();
   }
 
   private setReady(room: InternalRoom, playerId: string, ready: boolean) {
@@ -285,6 +345,24 @@ export class RoomManager {
     const player = this.mustGetPlayer(room, playerId);
     player.ready = ready;
     this.broadcastRoom(room);
+  }
+
+  private regeneratePin(room: InternalRoom, playerId: string) {
+    if (room.phase !== 'lobby') {
+      throw new ClientFacingError('You can only regenerate the PIN while the lobby is open.');
+    }
+
+    const player = this.mustGetPlayer(room, playerId);
+    if (!player.isHost) {
+      throw new ClientFacingError('Only the host can regenerate the join PIN.');
+    }
+
+    const nextPin = generateJoinPin();
+    const nextSalt = randomBytes(8).toString('hex');
+    room.joinPinSalt = nextSalt;
+    room.joinPinHash = hashJoinPin(nextPin, nextSalt);
+    this.pushSession(room, player, nextPin);
+    this.broadcastLobbyList();
   }
 
   private startMatch(room: InternalRoom, option: RematchOption) {
@@ -346,6 +424,7 @@ export class RoomManager {
 
     this.broadcastRoom(room);
     this.broadcastGame(room);
+    this.broadcastLobbyList();
   }
 
   private submitMove(room: InternalRoom, playerId: string, move: string) {
@@ -409,6 +488,7 @@ export class RoomManager {
         }
       };
       this.broadcastRoom(room);
+      this.broadcastLobbyList();
     }
 
     this.broadcastGame(room);
@@ -455,7 +535,6 @@ export class RoomManager {
 
     const requester = this.mustGetPlayer(room, room.pendingTakeback.fromPlayerId);
     const responder = this.mustGetPlayer(room, playerId);
-    const pending = room.pendingTakeback;
     room.pendingTakeback = undefined;
 
     if (!accept) {
@@ -503,6 +582,7 @@ export class RoomManager {
 
     this.broadcastRoom(room);
     this.broadcastGame(room);
+    this.broadcastLobbyList();
   }
 
   private handleRematch(
@@ -561,7 +641,8 @@ export class RoomManager {
     const player = this.mustGetPlayer(room, playerId);
     if (player.isHost) {
       this.broadcast(room, { type: 'room_closed', message });
-      this.rooms.delete(room.roomCode);
+      this.rooms.delete(room.lobbyId);
+      this.broadcastLobbyList();
       return;
     }
 
@@ -571,6 +652,7 @@ export class RoomManager {
     room.pendingTakeback = undefined;
     room.pendingRematch = undefined;
     this.broadcastRoom(room);
+    this.broadcastLobbyList();
   }
 
   private expireDisconnectedPlayers(room: InternalRoom, now: number) {
@@ -579,19 +661,22 @@ export class RoomManager {
       (player) => !player.connected && player.disconnectedAt !== undefined && now - player.disconnectedAt > RECONNECT_WINDOW_MS
     );
 
-    if (disconnected.length === 0) return;
+    if (disconnected.length === 0) return false;
 
     if (host && disconnected.some((player) => player.id === host.id)) {
       this.broadcast(room, { type: 'room_closed', message: 'The host did not reconnect in time.' });
-      this.rooms.delete(room.roomCode);
-      return;
+      this.rooms.delete(room.lobbyId);
+      this.broadcastLobbyList();
+      return true;
     }
 
     const guestExpired = disconnected.find((player) => !player.isHost);
-    if (!guestExpired) return;
+    if (!guestExpired) return false;
 
     this.broadcast(room, { type: 'room_closed', message: `${guestExpired.name} did not reconnect in time.` });
-    this.rooms.delete(room.roomCode);
+    this.rooms.delete(room.lobbyId);
+    this.broadcastLobbyList();
+    return true;
   }
 
   private currentClocks(game: MatchState, now: number): ClockState {
@@ -638,7 +723,9 @@ export class RoomManager {
 
   private serializeRoom(room: InternalRoom): RoomState {
     return {
-      roomCode: room.roomCode,
+      lobbyId: room.lobbyId,
+      title: room.title,
+      isPublic: true,
       createdAt: room.createdAt,
       hostPlayerId: room.hostPlayerId,
       phase: room.phase,
@@ -686,7 +773,7 @@ export class RoomManager {
     socket.send(JSON.stringify(message));
   }
 
-  private pushSession(room: InternalRoom, player: InternalPlayer) {
+  private pushSession(room: InternalRoom, player: InternalPlayer, hostJoinPin?: string) {
     if (!player.socket) return;
     this.send(player.socket, {
       type: 'session',
@@ -694,15 +781,59 @@ export class RoomManager {
         sessionToken: player.sessionToken,
         playerId: player.id,
         playerName: player.name,
-        roomCode: room.roomCode
+        lobbyId: room.lobbyId,
+        hostJoinPin
       }
     });
   }
 
-  private mustGetRoom(roomCode: string) {
-    const room = this.rooms.get(roomCode.trim());
+  private sendLobbyList(socket: WebSocket) {
+    this.send(socket, {
+      type: 'lobby_list',
+      lobbies: this.listPublicLobbies()
+    });
+  }
+
+  private broadcastLobbyList() {
+    const payload: ServerMessage = {
+      type: 'lobby_list',
+      lobbies: this.listPublicLobbies()
+    };
+
+    for (const socket of this.socketMeta.keys()) {
+      this.send(socket, payload);
+    }
+  }
+
+  private listPublicLobbies(): PublicLobbySummary[] {
+    return [...this.rooms.values()]
+      .map((room) => this.serializeLobbySummary(room))
+      .sort((left, right) => {
+        const phaseDelta = lobbySortWeight(left) - lobbySortWeight(right);
+        if (phaseDelta !== 0) return phaseDelta;
+        return right.createdAt - left.createdAt;
+      });
+  }
+
+  private serializeLobbySummary(room: InternalRoom): PublicLobbySummary {
+    const host = this.mustGetPlayer(room, room.hostPlayerId);
+    return {
+      lobbyId: room.lobbyId,
+      title: room.title,
+      hostName: host.name,
+      variant: room.settings.variant,
+      phase: room.phase,
+      seatsFilled: room.players.length,
+      seatsMax: 2,
+      createdAt: room.createdAt,
+      locked: true
+    };
+  }
+
+  private mustGetRoom(lobbyId: string) {
+    const room = this.rooms.get(lobbyId.trim().toUpperCase());
     if (!room) {
-      throw new ClientFacingError('That room code does not exist on this host.');
+      throw new ClientFacingError('That lobby is not live anymore.');
     }
     return room;
   }
@@ -710,17 +841,48 @@ export class RoomManager {
   private mustGetPlayer(room: InternalRoom, playerId: string) {
     const player = room.players.find((entry) => entry.id === playerId);
     if (!player) {
-      throw new ClientFacingError('That player is no longer in the room.');
+      throw new ClientFacingError('That player is no longer in the lobby.');
     }
     return player;
   }
 
-  private generateRoomCode() {
-    for (let attempt = 0; attempt < ROOM_CODE_ATTEMPTS; attempt += 1) {
-      const code = String(Math.floor(1000 + Math.random() * 9000));
+  private generateLobbyId() {
+    for (let attempt = 0; attempt < ROOM_ID_ATTEMPTS; attempt += 1) {
+      const code = createLobbyId();
       if (!this.rooms.has(code)) return code;
     }
-    throw new Error('Unable to generate a unique room code.');
+    throw new Error('Unable to generate a unique lobby id.');
+  }
+
+  private matchesJoinPin(room: InternalRoom, candidate: string) {
+    return room.joinPinHash === hashJoinPin(candidate, room.joinPinSalt);
+  }
+
+  private assertPinAllowed(lobbyId: string, address: string) {
+    const attemptKey = makePinAttemptKey(lobbyId, address);
+    const existing = this.pinAttempts.get(attemptKey);
+    if (!existing?.blockedUntil) return;
+    if (existing.blockedUntil <= Date.now()) {
+      this.pinAttempts.delete(attemptKey);
+      return;
+    }
+
+    const waitSeconds = Math.ceil((existing.blockedUntil - Date.now()) / 1000);
+    throw new ClientFacingError(`Too many wrong PIN attempts. Try again in ${waitSeconds} seconds.`);
+  }
+
+  private recordPinFailure(lobbyId: string, address: string) {
+    const attemptKey = makePinAttemptKey(lobbyId, address);
+    const previous = this.pinAttempts.get(attemptKey);
+    const count = (previous?.count ?? 0) + 1;
+    this.pinAttempts.set(attemptKey, {
+      count,
+      blockedUntil: count >= PIN_ATTEMPT_LIMIT ? Date.now() + PIN_COOLDOWN_MS : previous?.blockedUntil
+    });
+  }
+
+  private clearPinFailures(lobbyId: string, address: string) {
+    this.pinAttempts.delete(makePinAttemptKey(lobbyId, address));
   }
 }
 
@@ -740,8 +902,42 @@ function sanitizeName(value: string) {
   return trimmed || 'Player';
 }
 
+function sanitizeRoomTitle(value: string) {
+  const trimmed = value.trim().slice(0, 36);
+  return trimmed || 'Public Chess Room';
+}
+
 function rematchLabel(option: RematchOption) {
   if (option === 'swap') return 'side-swap';
   if (option === 'next_variant') return 'next-variant';
   return 'same-settings';
+}
+
+function createLobbyId() {
+  let id = '';
+  for (let index = 0; index < LOBBY_ID_LENGTH; index += 1) {
+    id += LOBBY_ID_ALPHABET[Math.floor(Math.random() * LOBBY_ID_ALPHABET.length)];
+  }
+  return id;
+}
+
+function generateJoinPin() {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+function hashJoinPin(pin: string, salt: string) {
+  return createHash('sha256')
+    .update(`${pin}:${salt}`)
+    .digest('hex');
+}
+
+function makePinAttemptKey(lobbyId: string, address: string) {
+  return `${lobbyId}:${address}`;
+}
+
+function lobbySortWeight(lobby: PublicLobbySummary) {
+  if (lobby.phase === 'lobby' && lobby.seatsFilled < lobby.seatsMax) return 0;
+  if (lobby.phase === 'lobby') return 1;
+  if (lobby.phase === 'playing') return 2;
+  return 3;
 }

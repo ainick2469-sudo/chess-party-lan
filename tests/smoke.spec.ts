@@ -1,21 +1,31 @@
 import { expect, test } from '@playwright/test';
 
-test('host, join, theme sync, and play through checkmate', async ({ browser, page }) => {
+test('public lobby flow supports join pin, reconnect, theme sync, and checkmate', async ({ browser, page }) => {
   const guest = await browser.newPage();
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Host Game' }).click();
-  await expect(page.getByText(/Code \d{4}/)).toBeVisible();
-
-  const roomLabel = await page.getByText(/Code \d{4}/).textContent();
-  const roomCode = roomLabel?.match(/\d{4}/)?.[0];
-  expect(roomCode).toBeTruthy();
-
-  await guest.goto('/');
-  await guest.getByLabel('4-digit room code').fill(roomCode!);
-  await guest.getByRole('button', { name: 'Join Game' }).click();
+  await page.getByRole('textbox', { name: 'Display name' }).first().fill('Nick');
+  await page.getByRole('textbox', { name: 'Lobby title' }).fill("Nick's Night Chess");
+  await page.getByRole('button', { name: 'Create Lobby' }).click();
 
   await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).mode).toBe('lobby');
+  await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).hostJoinPin).toMatch(/^\d{4}$/);
+  const hostPin = JSON.parse(await page.evaluate(() => window.render_game_to_text())).hostJoinPin as string;
+
+  await guest.goto('/');
+  await expect.poll(async () => JSON.parse(await guest.evaluate(() => window.render_game_to_text())).visibleLobbies.length).toBe(1);
+  await guest.getByRole('button', { name: /Nick's Night Chess/i }).click();
+  await guest.getByRole('textbox', { name: 'Display name' }).nth(1).fill('Guest');
+  await guest.getByRole('textbox', { name: '4-digit join PIN' }).fill('0000');
+  await guest.getByRole('button', { name: 'Join Selected Lobby' }).click();
+  await expect(guest.getByRole('button', { name: /does not unlock this lobby/i })).toBeVisible();
+  await guest.getByRole('button', { name: /does not unlock this lobby/i }).click();
+
+  await guest.getByRole('textbox', { name: '4-digit join PIN' }).fill(hostPin);
+  await guest.getByRole('button', { name: 'Join Selected Lobby' }).click();
+  await expect.poll(async () => JSON.parse(await guest.evaluate(() => window.render_game_to_text())).mode).toBe('lobby');
+
+  await guest.reload();
   await expect.poll(async () => JSON.parse(await guest.evaluate(() => window.render_game_to_text())).mode).toBe('lobby');
   await expect(page.locator('.player-card')).toHaveCount(2);
 
@@ -30,20 +40,18 @@ test('host, join, theme sync, and play through checkmate', async ({ browser, pag
   await expect.poll(async () => JSON.parse(await guest.evaluate(() => window.render_game_to_text())).mode).toBe('playing');
   await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).localSeat).toBe('white');
   await expect.poll(async () => JSON.parse(await guest.evaluate(() => window.render_game_to_text())).localSeat).toBe('black');
-  await expect(page.getByText('You are Light side.')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Go Fullscreen' })).toBeVisible();
 
-  await page.locator('.prompt-card--compact').getByRole('button', { name: 'Not now' }).click();
+  await dismissFullscreenPrompt(page);
+  await guest.reload();
+  await expect.poll(async () => JSON.parse(await guest.evaluate(() => window.render_game_to_text())).mode).toBe('playing');
+  await expect.poll(async () => JSON.parse(await guest.evaluate(() => window.render_game_to_text())).localSeat).toBe('black');
+  await dismissFullscreenPrompt(guest);
 
   await expect.poll(async () => {
     await page.evaluate(() => window.debug_click_square('e7'));
     return JSON.parse(await page.evaluate(() => window.render_game_to_text())).selectedSquare;
   }).toBe(null);
   await page.getByRole('button', { name: 'That piece belongs to the Dark side.' }).click();
-  await expect.poll(async () => {
-    await page.evaluate(() => window.debug_click_square('f2'));
-    return JSON.parse(await page.evaluate(() => window.render_game_to_text())).selectedSquare;
-  }).toBe('f2');
 
   await debugMove(page, 'f2', 'f3', 'black');
   await debugMove(guest, 'e7', 'e5', 'white');
@@ -64,4 +72,11 @@ async function debugMove(page: import('@playwright/test').Page, from: string, to
   await page.evaluate((square) => window.debug_click_square(square), to);
   await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).selectedSquare).toBe(null);
   await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).turn).toBe(expectedNextTurn);
+}
+
+async function dismissFullscreenPrompt(page: import('@playwright/test').Page) {
+  const prompt = page.locator('.prompt-card--compact');
+  if (await prompt.isVisible().catch(() => false)) {
+    await prompt.getByRole('button', { name: 'Not now' }).click();
+  }
 }

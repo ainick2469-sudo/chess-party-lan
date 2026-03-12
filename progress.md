@@ -25,3 +25,21 @@ Notes
   - `npm run build`
   - `npm run test:smoke`
   - Packaged desktop release verification via `scripts/verify-desktop-release.ps1` succeeded and the desktop copy announced its LAN URL normally.
+
+Internet-hosted overhaul notes
+- Converted the product flow from LAN-first to hosted internet multiplayer with a public lobby browser and private 4-digit join PINs.
+- Added a public lobby list protocol (`lobby_list`), public `lobbyId`s, host-only PIN regeneration, reconnect-aware session reuse, and a `/health` endpoint for hosted deploys.
+- Reworked the landing UI around `Create Lobby` + `Browse Lobbies`, including public room titles, join-from-list flow, and hosted copy instead of LAN instructions.
+- Added reconnect/backoff on the client so refreshes auto-rejoin the same lobby or match via stored session token.
+- Added `render.yaml` plus `npm run build:hosted` so the repo is ready for a Render web service deployment.
+- Updated browser smoke coverage to exercise wrong PIN handling, public-list join, theme sync, reload/reconnect, and a full checkmate path.
+
+Latest verification
+- `npm run build:hosted`
+- `npm test`
+- `npm run test:smoke`
+
+Known follow-ups
+- Deploy the repo to Render and verify the public URL end-to-end with real remote clients.
+- Consider server-side persistence or shared storage before scaling beyond one Render instance.
+- Optional: add a clearer public-lobby status filter/sort UI if the lobby list gets busy.

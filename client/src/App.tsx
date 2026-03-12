@@ -18,6 +18,7 @@ import {
   type ClientMessage,
   type GameSnapshot,
   type LobbySettings,
+  type PublicLobbySummary,
   type RematchOption,
   type RoomState,
   type ServerMessage,
@@ -28,19 +29,23 @@ const STORAGE_KEY = 'chess-party-lan-session';
 
 interface StoredSession {
   sessionToken?: string;
-  roomCode?: string;
+  lobbyId?: string;
   playerName?: string;
+  hostJoinPin?: string;
 }
 
 export function App() {
-  const [connectionState, setConnectionState] = useState<'connecting' | 'online' | 'offline'>('connecting');
+  const [connectionState, setConnectionState] = useState<'connecting' | 'reconnecting' | 'online' | 'offline'>('connecting');
+  const [publicLobbies, setPublicLobbies] = useState<PublicLobbySummary[]>([]);
   const [room, setRoom] = useState<RoomState | null>(null);
   const [game, setGame] = useState<GameSnapshot | null>(null);
   const [prompt, setPrompt] = useState<ServerPrompt | null>(null);
   const [message, setMessage] = useState('');
   const [playerName, setPlayerName] = useState('Host');
+  const [roomTitle, setRoomTitle] = useState("Nick's Table");
   const [joinName, setJoinName] = useState('Guest');
-  const [joinCode, setJoinCode] = useState('');
+  const [joinPin, setJoinPin] = useState('');
+  const [selectedLobbyId, setSelectedLobbyId] = useState<string>();
   const [showHowItWorks, setShowHowItWorks] = useState(false);
   const [selectedSquare, setSelectedSquare] = useState<string>();
   const [previewSnapshot, setPreviewSnapshot] = useState<GameSnapshot>(() => createInitialSnapshot(defaultLobbySettings, 960));
@@ -52,34 +57,59 @@ export function App() {
   const socketRef = useRef<WebSocket | null>(null);
   const latestTextState = useRef('{}');
   const previousPhase = useRef<RoomState['phase'] | undefined>(undefined);
+  const reconnectTimerRef = useRef<number>();
+  const reconnectAttemptsRef = useRef(0);
+  const shouldReconnectRef = useRef(true);
+  const pendingAutoJoinRef = useRef(false);
 
   useEffect(() => {
-    const socket = new WebSocket(resolveSocketUrl());
-    socketRef.current = socket;
+    const connect = () => {
+      setConnectionState(reconnectAttemptsRef.current === 0 ? 'connecting' : 'reconnecting');
+      const socket = new WebSocket(resolveSocketUrl());
+      socketRef.current = socket;
 
-    socket.addEventListener('open', () => {
-      setConnectionState('online');
-      const session = readStoredSession();
-      setStoredSession(session);
-      if (session.roomCode && session.playerName) {
-        sendMessage(socket, {
-          type: 'join_room',
-          roomCode: session.roomCode,
-          playerName: session.playerName,
-          sessionToken: session.sessionToken
-        });
+      socket.addEventListener('open', () => {
+        reconnectAttemptsRef.current = 0;
+        setConnectionState('online');
+        sendMessage(socket, { type: 'subscribe_lobbies' });
+        const session = readStoredSession();
+        setStoredSession(session);
+        if (session.lobbyId && session.playerName) {
+          pendingAutoJoinRef.current = true;
+          sendMessage(socket, {
+            type: 'join_room',
+            lobbyId: session.lobbyId,
+            playerName: session.playerName,
+            sessionToken: session.sessionToken
+          });
+        }
+      });
+
+      socket.addEventListener('message', (event) => {
+        handleServerMessage(JSON.parse(event.data) as ServerMessage);
+      });
+
+      socket.addEventListener('close', () => {
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+        }
+        setConnectionState('offline');
+        if (!shouldReconnectRef.current) return;
+        const delay = Math.min(5_000, 400 * 2 ** Math.min(reconnectAttemptsRef.current, 4));
+        reconnectAttemptsRef.current += 1;
+        reconnectTimerRef.current = window.setTimeout(connect, delay);
+      });
+    };
+
+    connect();
+
+    return () => {
+      shouldReconnectRef.current = false;
+      if (reconnectTimerRef.current) {
+        window.clearTimeout(reconnectTimerRef.current);
       }
-    });
-
-    socket.addEventListener('message', (event) => {
-      handleServerMessage(JSON.parse(event.data) as ServerMessage);
-    });
-
-    socket.addEventListener('close', () => {
-      setConnectionState('offline');
-    });
-
-    return () => socket.close();
+      socketRef.current?.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -87,6 +117,12 @@ export function App() {
       setPreviewSnapshot(createInitialSnapshot(room.settings, 960));
     }
   }, [room]);
+
+  useEffect(() => {
+    if (room?.phase === 'lobby') {
+      setGame(null);
+    }
+  }, [room?.lobbyId, room?.phase]);
 
   useEffect(() => {
     let frame = 0;
@@ -127,6 +163,12 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [room?.phase]);
 
+  useEffect(() => {
+    if (selectedLobbyId && publicLobbies.some((lobby) => lobby.lobbyId === selectedLobbyId)) return;
+    const preferred = publicLobbies.find(isJoinableLobby) ?? publicLobbies[0];
+    setSelectedLobbyId(preferred?.lobbyId);
+  }, [publicLobbies, selectedLobbyId]);
+
   const activeSettings = room?.settings ?? defaultLobbySettings;
   const theme = getBoardTheme(activeSettings.boardSwatchId);
   const palette = getPiecePalette(activeSettings.piecePaletteId);
@@ -142,6 +184,8 @@ export function App() {
       : room?.phase === 'finished'
         ? `Round finished. You played ${sideToColorName(localColor)}.`
         : `Previewing from the ${sideToColorName(localColor).toLowerCase()} seat.`;
+  const selectedLobby = selectedLobbyId ? publicLobbies.find((lobby) => lobby.lobbyId === selectedLobbyId) : undefined;
+  const joinReady = Boolean(selectedLobby && isJoinableLobby(selectedLobby) && joinPin.trim().length === 4);
 
   useEffect(() => {
     if (!game || !selectedSquare) return;
@@ -154,7 +198,11 @@ export function App() {
   useEffect(() => {
     latestTextState.current = JSON.stringify({
       mode: room?.phase ?? 'landing',
-      roomCode: room?.roomCode ?? null,
+      lobbyId: room?.lobbyId ?? null,
+      roomTitle: room?.title ?? null,
+      selectedLobbyId: selectedLobbyId ?? null,
+      visibleLobbies: publicLobbies.map((lobby) => `${lobby.lobbyId}:${lobby.phase}:${lobby.seatsFilled}/${lobby.seatsMax}`),
+      hostJoinPin: localPlayer?.isHost ? storedSession.hostJoinPin ?? null : null,
       variant: game?.variant ?? room?.settings.variant ?? defaultLobbySettings.variant,
       turn: game?.turn ?? null,
       localSeat: room?.localSeatColor ?? localColor,
@@ -179,17 +227,39 @@ export function App() {
     window.debug_request_rematch = (option: RematchOption) => requestRematch(option);
     window.debug_respond_prompt = (accept: boolean) => handlePromptResponse(accept);
     window.debug_toggle_fullscreen = () => toggleFullscreen();
-  }, [activeSettings.boardSwatchId, boardMessage, game, isFullscreen, localColor, prompt, room, selectedSquare]);
+  }, [
+    activeSettings.boardSwatchId,
+    boardMessage,
+    game,
+    isFullscreen,
+    localColor,
+    localPlayer?.isHost,
+    prompt,
+    publicLobbies,
+    room,
+    selectedLobbyId,
+    selectedSquare,
+    storedSession.hostJoinPin
+  ]);
 
   function handleServerMessage(payload: ServerMessage) {
+    if (payload.type === 'lobby_list') {
+      setPublicLobbies(payload.lobbies);
+      return;
+    }
     if (payload.type === 'session') {
-      const nextSession = {
-        sessionToken: payload.session.sessionToken,
-        roomCode: payload.session.roomCode,
-        playerName: payload.session.playerName
-      };
-      setStoredSession(nextSession);
-      writeStoredSession(nextSession);
+      setStoredSession((current) => {
+        const nextSession = {
+          sessionToken: payload.session.sessionToken,
+          lobbyId: payload.session.lobbyId,
+          playerName: payload.session.playerName,
+          hostJoinPin:
+            payload.session.hostJoinPin ??
+            (current.lobbyId === payload.session.lobbyId ? current.hostJoinPin : undefined)
+        };
+        writeStoredSession(nextSession);
+        return nextSession;
+      });
       if (payload.session.playerName) {
         setPlayerName(payload.session.playerName);
         setJoinName(payload.session.playerName);
@@ -197,6 +267,7 @@ export function App() {
       return;
     }
     if (payload.type === 'room_state') {
+      pendingAutoJoinRef.current = false;
       setRoom(payload.room);
       return;
     }
@@ -214,27 +285,71 @@ export function App() {
       setGame(null);
       setPrompt(null);
       setSelectedSquare(undefined);
+      clearActiveLobbySession();
       return;
     }
     if (payload.type === 'error') {
+      if (pendingAutoJoinRef.current) {
+        pendingAutoJoinRef.current = false;
+        clearActiveLobbySession();
+      }
       setMessage(payload.message);
     }
   }
 
+  function updateStoredSession(transform: (current: StoredSession) => StoredSession) {
+    setStoredSession((current) => {
+      const next = transform(current);
+      writeStoredSession(next);
+      return next;
+    });
+  }
+
+  function clearActiveLobbySession() {
+    updateStoredSession((current) => ({
+      sessionToken: current.sessionToken,
+      playerName: current.playerName,
+      hostJoinPin: undefined,
+      lobbyId: undefined
+    }));
+  }
+
   function dispatch(messageToSend: ClientMessage) {
     if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) {
-      setMessage('The connection to the host is not available.');
+      setMessage('The connection to the hosted server is not available.');
       return;
     }
     sendMessage(socketRef.current, messageToSend);
   }
 
   function handleCreateRoom() {
-    dispatch({ type: 'create_room', playerName, sessionToken: storedSession.sessionToken });
+    setMessage('');
+    dispatch({
+      type: 'create_room',
+      playerName,
+      roomTitle,
+      sessionToken: storedSession.sessionToken
+    });
   }
 
   function handleJoinRoom() {
-    dispatch({ type: 'join_room', roomCode: joinCode.trim(), playerName: joinName, sessionToken: storedSession.sessionToken });
+    if (!selectedLobby) {
+      setMessage('Pick a public lobby from the list first.');
+      return;
+    }
+    if (!isJoinableLobby(selectedLobby)) {
+      setMessage('That lobby is not accepting new players right now.');
+      return;
+    }
+
+    setMessage('');
+    dispatch({
+      type: 'join_room',
+      lobbyId: selectedLobby.lobbyId,
+      joinPin: joinPin.trim(),
+      playerName: joinName,
+      sessionToken: storedSession.sessionToken
+    });
   }
 
   function updateSettings<K extends keyof LobbySettings>(key: K, value: LobbySettings[K]) {
@@ -287,6 +402,15 @@ export function App() {
     dispatch({ type: 'request_rematch', option, action: 'request' });
   }
 
+  async function copyText(text: string, successMessage: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setMessage(successMessage);
+    } catch {
+      setMessage('Clipboard access failed on this browser.');
+    }
+  }
+
   async function toggleFullscreen() {
     setShowFullscreenPrompt(false);
     if (document.fullscreenElement) {
@@ -330,12 +454,12 @@ export function App() {
     >
       <header className={`hero ${room ? 'hero--compact' : ''}`}>
         <div>
-          <p className="eyebrow">LAN Casual Chess Party</p>
-          <h1>Chess Party LAN</h1>
-          <p className="subtitle">Premium local multiplayer chess with variant rules, themed tables, and a proper tabletop camera.</p>
+          <p className="eyebrow">Hosted Internet Chess</p>
+          <h1>Chess Party Online</h1>
+          <p className="subtitle">One shared website, a public lobby browser, and a private 4-digit PIN for each match table.</p>
         </div>
         <div className="hero-actions">
-          {room ? <span className="room-code">Code {room.roomCode}</span> : null}
+          {room ? <span className="room-code">Lobby {room.lobbyId}</span> : <span className="room-code">{publicLobbies.length} Live Lobbies</span>}
           <div className={`connection-pill connection-pill--${connectionState}`}>{connectionState}</div>
         </div>
       </header>
@@ -350,41 +474,79 @@ export function App() {
         <section className="landing-grid">
           <article className="panel landing-card">
             <div className="panel-heading">
-              <h2>Host Game</h2>
-              <span className="support-copy">Runs on your LAN host</span>
+              <h2>Create Lobby</h2>
+              <span className="support-copy">Host a public room and keep the PIN private.</span>
             </div>
             <label className="field">
               <span>Display name</span>
               <input value={playerName} onChange={(event) => setPlayerName(event.target.value)} maxLength={20} />
             </label>
+            <label className="field">
+              <span>Lobby title</span>
+              <input value={roomTitle} onChange={(event) => setRoomTitle(event.target.value)} maxLength={36} />
+            </label>
             <button className="primary-button" onClick={handleCreateRoom}>
-              Host Game
+              Create Lobby
             </button>
           </article>
 
-          <article className="panel landing-card">
+          <article className="panel landing-card landing-card--browse">
             <div className="panel-heading">
-              <h2>Join Game</h2>
-              <span className="support-copy">Open the host&apos;s LAN link first</span>
+              <h2>Browse Lobbies</h2>
+              <span className="support-copy">Everyone sees the same live room list.</span>
             </div>
+
+            <div className="lobby-browser" role="list" aria-label="Public lobbies">
+              {publicLobbies.length ? (
+                publicLobbies.map((lobby) => (
+                  <button
+                    key={lobby.lobbyId}
+                    type="button"
+                    className={`lobby-row ${selectedLobbyId === lobby.lobbyId ? 'lobby-row--selected' : ''}`}
+                    onClick={() => setSelectedLobbyId(lobby.lobbyId)}
+                  >
+                    <div className="lobby-row__body">
+                      <strong>{lobby.title}</strong>
+                      <span className="support-copy">
+                        {lobby.hostName} · {getVariantDefinition(lobby.variant).label} · {lobby.lobbyId}
+                      </span>
+                    </div>
+                    <div className="lobby-row__meta">
+                      <span className="status-pill">{lobbyStatusLabel(lobby)}</span>
+                      <span className="support-copy">
+                        {lobby.seatsFilled}/{lobby.seatsMax}
+                      </span>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="empty-state">No public rooms are live right now. Start one and your friends will see it here immediately.</div>
+              )}
+            </div>
+
             <label className="field">
               <span>Display name</span>
               <input value={joinName} onChange={(event) => setJoinName(event.target.value)} maxLength={20} />
             </label>
             <label className="field">
-              <span>4-digit room code</span>
-              <input value={joinCode} onChange={(event) => setJoinCode(event.target.value.replace(/\D/g, '').slice(0, 4))} />
+              <span>4-digit join PIN</span>
+              <input value={joinPin} onChange={(event) => setJoinPin(event.target.value.replace(/\D/g, '').slice(0, 4))} />
             </label>
-            <button className="secondary-button" onClick={handleJoinRoom}>
-              Join Game
+            <button className="secondary-button" onClick={handleJoinRoom} disabled={!joinReady}>
+              Join Selected Lobby
             </button>
+            <p className="support-copy">
+              {selectedLobby
+                ? `${selectedLobby.title} is ${lobbyStatusLabel(selectedLobby).toLowerCase()}. You still need the host's 4-digit PIN.`
+                : 'Select a lobby row, then enter the 4-digit PIN the host shared with you.'}
+            </p>
           </article>
 
           <article className="panel panel--wide landing-guide">
             <div className="panel-title-row">
               <div>
                 <h2>How This Works</h2>
-                <p className="support-copy">Fast setup for two players on the same local network.</p>
+                <p className="support-copy">Fast setup for friends joining from anywhere.</p>
               </div>
               <button className="ghost-button" onClick={() => setShowHowItWorks((current) => !current)}>
                 {showHowItWorks ? 'Hide' : 'Show'}
@@ -392,14 +554,14 @@ export function App() {
             </div>
             {showHowItWorks ? (
               <ol className="instruction-list">
-                <li>One player runs `start-host.bat` and leaves the console window open.</li>
-                <li>The host shares the LAN URL printed in that console.</li>
-                <li>Both players open that page, then use the same 4-digit room code.</li>
+                <li>The host creates a public lobby and gets a private 4-digit join PIN.</li>
+                <li>Everyone opens the same website and sees the live lobby list.</li>
+                <li>Guests click the right lobby row, enter the host&apos;s PIN, and join.</li>
                 <li>Tune theme, board look, camera, and rules. Ready up when both players are set.</li>
                 <li>In the match, select one of your pieces and then a highlighted square.</li>
               </ol>
             ) : (
-              <p className="support-copy">The host creates the room, the guest joins from the host&apos;s LAN URL, and both browsers stay in sync over the local network.</p>
+              <p className="support-copy">Every room appears in the public list, but only players with the 4-digit PIN can enter that table.</p>
             )}
           </article>
         </section>
@@ -409,11 +571,46 @@ export function App() {
             <div className="section-intro">
               <div>
                 <p className="eyebrow">Room Setup</p>
-                <h2>Customize The Table</h2>
+                <h2>{room.title}</h2>
               </div>
               <span className="status-pill status-pill--seat">{sideToColorName(localColor)}</span>
             </div>
-            <p className="support-copy">Tune the room before kickoff. Every change syncs live to your brother before the match starts.</p>
+            <p className="support-copy">This public lobby is visible to everyone on the site. Share the 4-digit PIN privately, then tune the room before kickoff.</p>
+
+            <SettingsGroup title="Invite">
+              <div className="invite-panel">
+                <div>
+                  <strong>{room.title}</strong>
+                  <div className="support-copy">Lobby {room.lobbyId} appears in the public browser list.</div>
+                </div>
+                {localPlayer?.isHost ? <span className="room-code invite-pin">PIN {storedSession.hostJoinPin ?? '----'}</span> : null}
+              </div>
+              <div className="invite-actions">
+                <button className="secondary-button" onClick={() => void copyText(window.location.origin, 'Site link copied.')}>
+                  Copy Site Link
+                </button>
+                {localPlayer?.isHost ? (
+                  <>
+                    <button
+                      className="ghost-button"
+                      onClick={() =>
+                        void copyText(
+                          `Play at ${window.location.origin}\nLobby: ${room.title}\nPIN: ${storedSession.hostJoinPin ?? '----'}`,
+                          'Invite copied.'
+                        )
+                      }
+                    >
+                      Copy Invite
+                    </button>
+                    {room.phase === 'lobby' ? (
+                      <button className="ghost-button" onClick={() => dispatch({ type: 'regenerate_pin' })}>
+                        Regenerate PIN
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
+            </SettingsGroup>
 
             <SettingsGroup title="Mode">
               <select value={activeSettings.variant} onChange={(event) => updateSettings('variant', event.target.value as LobbySettings['variant'])} disabled={room.phase !== 'lobby'}>
@@ -567,7 +764,7 @@ export function App() {
             </div>
 
             <div className="board-footer">
-              <span>{game ? game.outcomeText : 'Preview the table while you tune the room.'}</span>
+              <span>{game ? game.outcomeText : 'Preview the table while your public lobby fills.'}</span>
               <span>{footerMessage}</span>
             </div>
           </section>
@@ -651,7 +848,7 @@ export function App() {
         <div className="prompt-backdrop">
           <div className="prompt-card">
             <p className="eyebrow">{prompt.kind === 'takeback_request' ? 'Takeback Request' : 'Rematch Request'}</p>
-            <h2>{prompt.kind === 'takeback_request' ? 'Your brother wants to rewind the last move.' : 'A new round is ready.'}</h2>
+            <h2>{prompt.kind === 'takeback_request' ? 'Your friend wants to rewind the last move.' : 'A new round is ready.'}</h2>
             <p>{prompt.text}</p>
             <div className="action-row">
               <button className="primary-button" onClick={() => handlePromptResponse(true)}>
@@ -700,9 +897,9 @@ function resolveDisplaySeat(room: RoomState, settings: LobbySettings) {
 }
 
 function getBoardMessage(room: RoomState | null, game: GameSnapshot | null, localColor: 'white' | 'black', selectedSquare?: string) {
-  if (!room) return 'Create or join a room to start a match.';
+  if (!room) return 'Create a public lobby or pick one from the list.';
   if (room.phase === 'lobby') return `Previewing ${sideToColorName(localColor).toLowerCase()} perspective before the round begins.`;
-  if (!game) return 'Waiting for the match state to arrive from the host.';
+  if (!game) return 'Waiting for the match state to arrive from the hosted server.';
   if (game.status !== 'active') return game.outcomeText;
   if (game.turn !== localColor) return `${sideToColorName(game.turn)} is thinking.`;
   if (selectedSquare) return `Piece selected on ${selectedSquare}. Choose one of the highlighted destinations.`;
@@ -743,6 +940,17 @@ function SettingsGroup({ title, children }: { title: string; children: React.Rea
       <div className="stack">{children}</div>
     </section>
   );
+}
+
+function lobbyStatusLabel(lobby: PublicLobbySummary) {
+  if (lobby.phase === 'playing') return 'In Game';
+  if (lobby.phase === 'finished') return 'Finished';
+  if (lobby.seatsFilled >= lobby.seatsMax) return 'Full';
+  return 'Open';
+}
+
+function isJoinableLobby(lobby: PublicLobbySummary) {
+  return lobby.phase === 'lobby' && lobby.seatsFilled < lobby.seatsMax;
 }
 
 function resolveSocketUrl() {

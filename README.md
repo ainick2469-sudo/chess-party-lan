@@ -1,21 +1,37 @@
-# Chess Party LAN
+# Chess Party Online
 
-Two-player LAN chess with a 3D tabletop board, theme customization, and variants.
+Two-player internet chess with a 3D tabletop board, public lobby browser, and private 4-digit join PINs.
 
-## Fast Start
+## Local Development
 
-If you downloaded this repo as a ZIP from GitHub:
+1. Install dependencies with the bundled Node runtime or your own Node 22 runtime.
+2. Run `npm run dev`.
+3. Open `http://localhost:5173`.
 
-1. Extract the ZIP.
-2. Open the extracted folder.
-3. Double-click [`start-host.bat`](./start-host.bat).
-4. Keep the console window open.
-5. Send the `LAN URL` shown in the console to the other player.
-6. The guest opens that URL in a browser and joins with the 4-digit room code shown in the app.
+The client uses Vite in development and connects to the WebSocket server on port `3000`.
 
-## Notes
+## Hosted Build
 
-- Only the host needs to run `start-host.bat`.
-- Both players need to be on the same Wi-Fi / LAN.
-- If the browser does not open automatically, copy the printed `Local URL` into the host browser manually.
-- The built client lives in [`client/dist`](./client/dist) and the bundled server lives in [`dist/server`](./dist/server).
+Use:
+
+```bash
+npm run build:hosted
+node dist/server/index.cjs
+```
+
+The server serves the built client and WebSocket endpoint from the same origin.
+
+## Render
+
+This repo includes [render.yaml](./render.yaml). The intended hosted flow is:
+
+1. Push the repo to GitHub.
+2. Create a Render Blueprint or web service from the repo.
+3. Let Render run the build and start commands from `render.yaml`.
+4. Share the public site URL with friends.
+
+Every room appears in the lobby browser, but joining still requires the host's 4-digit PIN.
+
+## Legacy LAN Package
+
+The desktop BAT flow still exists for local testing and packaging, but the main product path is now the hosted internet site.
