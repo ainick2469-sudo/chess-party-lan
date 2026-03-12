@@ -27,8 +27,20 @@ This repo includes [render.yaml](./render.yaml). The intended hosted flow is:
 
 1. Push the repo to GitHub.
 2. Create a Render Blueprint or web service from the repo.
-3. Let Render run the build and start commands from `render.yaml`.
-4. Share the public site URL with friends.
+3. Use this build command:
+
+```bash
+npm ci --include=dev && npm run build:hosted
+```
+
+4. Use this start command:
+
+```bash
+node dist/server/index.cjs
+```
+
+The `--include=dev` flag is required on Render because the build depends on dev tools like Vite and TypeScript even though the runtime itself is production-only.
+5. Share the public site URL with friends.
 
 Every room appears in the lobby browser, but joining still requires the host's 4-digit PIN.
 

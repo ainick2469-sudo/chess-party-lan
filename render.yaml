@@ -3,7 +3,7 @@ services:
     name: chess-party-online
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build:hosted
+    buildCommand: npm ci --include=dev && npm run build:hosted
     startCommand: node dist/server/index.cjs
     healthCheckPath: /health
     envVars:
