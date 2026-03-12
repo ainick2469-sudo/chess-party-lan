@@ -225,6 +225,7 @@ export const pieceSets: PieceSet[] = [
       queen: 1.24,
       king: 1.34
     },
+    importRotation: [-Math.PI / 2, 0, 0],
     rotationY: 0
   }
 ];

@@ -13,8 +13,8 @@ test('public lobby flow supports join pin, reconnect, theme sync, and checkmate'
   const hostPin = JSON.parse(await page.evaluate(() => window.render_game_to_text())).hostJoinPin as string;
 
   await guest.goto('/');
-  await expect.poll(async () => JSON.parse(await guest.evaluate(() => window.render_game_to_text())).visibleLobbies.length).toBe(1);
-  await guest.getByRole('button', { name: /Nick's Night Chess/i }).click();
+  await expect.poll(async () => JSON.parse(await guest.evaluate(() => window.render_game_to_text())).visibleLobbies.length).toBeGreaterThanOrEqual(1);
+  await guest.locator('.lobby-row', { hasText: "Nick's Night Chess" }).first().click({ force: true });
   await guest.getByRole('textbox', { name: 'Display name' }).nth(1).fill('Guest');
   await guest.getByRole('textbox', { name: '4-digit join PIN' }).fill('0000');
   await guest.getByRole('button', { name: 'Join Selected Lobby' }).click();

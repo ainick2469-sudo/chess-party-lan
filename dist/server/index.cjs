@@ -27294,131 +27294,6 @@ var import_websocket_server = __toESM(require_websocket_server(), 1);
 // server/src/room-manager.ts
 var import_node_crypto = require("node:crypto");
 
-// shared/src/presets.ts
-var clockPresets = [
-  { id: "untimed", label: "Untimed", initialMs: null, incrementMs: 0 },
-  { id: "5+0", label: "5 + 0", initialMs: 5 * 6e4, incrementMs: 0 },
-  { id: "10+0", label: "10 + 0", initialMs: 10 * 6e4, incrementMs: 0 },
-  { id: "10+5", label: "10 + 5", initialMs: 10 * 6e4, incrementMs: 5e3 },
-  { id: "15+10", label: "15 + 10", initialMs: 15 * 6e4, incrementMs: 1e4 }
-];
-var themePresets = [
-  {
-    id: "study",
-    name: "Warm Wood Study",
-    lightSquare: "#f1ddbc",
-    darkSquare: "#8a5e45",
-    border: "#3f291f",
-    innerBorder: "#8b654c",
-    tableTop: "#2f4338",
-    tableEdge: "#21150f",
-    felt: "#18251e",
-    accent: "#e5b368",
-    ambient: "#f8ecd7",
-    glow: "#ffdca1",
-    backgroundTop: "#31261f",
-    backgroundBottom: "#0f141d",
-    roomGlow: "#d58d52",
-    floor: "#151b22",
-    floorAccent: "#2c3c37",
-    uiBackground: "#0d1218",
-    uiPanel: "rgba(18, 23, 31, 0.76)",
-    uiPanelElevated: "rgba(28, 34, 43, 0.84)",
-    uiSurface: "rgba(12, 17, 24, 0.82)",
-    uiBorder: "rgba(255, 223, 177, 0.14)",
-    uiText: "#f6ecdc",
-    uiMuted: "#d8ccb7",
-    uiButton: "#efc57a",
-    uiButtonText: "#23170f",
-    uiSecondary: "rgba(255, 255, 255, 0.1)",
-    uiInput: "rgba(7, 11, 17, 0.72)",
-    uiShadow: "rgba(0, 0, 0, 0.42)",
-    uiHighlight: "rgba(255, 211, 138, 0.2)"
-  },
-  {
-    id: "neon",
-    name: "Neon Strategy",
-    lightSquare: "#b7f3ff",
-    darkSquare: "#26506a",
-    border: "#061422",
-    innerBorder: "#0f3144",
-    tableTop: "#081928",
-    tableEdge: "#030b11",
-    felt: "#091624",
-    accent: "#78ffd6",
-    ambient: "#17324a",
-    glow: "#8cfffc",
-    backgroundTop: "#071929",
-    backgroundBottom: "#02060d",
-    roomGlow: "#35d9ff",
-    floor: "#040b13",
-    floorAccent: "#102538",
-    uiBackground: "#040912",
-    uiPanel: "rgba(7, 16, 25, 0.8)",
-    uiPanelElevated: "rgba(11, 22, 35, 0.9)",
-    uiSurface: "rgba(5, 11, 19, 0.82)",
-    uiBorder: "rgba(136, 255, 244, 0.18)",
-    uiText: "#eafcff",
-    uiMuted: "#b7d9e0",
-    uiButton: "#7effdf",
-    uiButtonText: "#042019",
-    uiSecondary: "rgba(117, 219, 255, 0.1)",
-    uiInput: "rgba(3, 9, 16, 0.82)",
-    uiShadow: "rgba(0, 8, 18, 0.56)",
-    uiHighlight: "rgba(115, 255, 222, 0.18)"
-  },
-  {
-    id: "marble",
-    name: "Fantasy Marble",
-    lightSquare: "#f1e5da",
-    darkSquare: "#7a6172",
-    border: "#2d1f2b",
-    innerBorder: "#5a4052",
-    tableTop: "#4f2435",
-    tableEdge: "#27111c",
-    felt: "#3f1e2a",
-    accent: "#f6ce71",
-    ambient: "#f3d8cb",
-    glow: "#ffe7a8",
-    backgroundTop: "#281925",
-    backgroundBottom: "#0e1016",
-    roomGlow: "#f3b46e",
-    floor: "#161219",
-    floorAccent: "#372232",
-    uiBackground: "#0d1018",
-    uiPanel: "rgba(25, 20, 32, 0.8)",
-    uiPanelElevated: "rgba(36, 28, 45, 0.9)",
-    uiSurface: "rgba(18, 14, 24, 0.84)",
-    uiBorder: "rgba(255, 225, 168, 0.16)",
-    uiText: "#f7ece3",
-    uiMuted: "#d7c8c1",
-    uiButton: "#f0c86d",
-    uiButtonText: "#2a1707",
-    uiSecondary: "rgba(255, 255, 255, 0.08)",
-    uiInput: "rgba(12, 9, 18, 0.8)",
-    uiShadow: "rgba(0, 0, 0, 0.46)",
-    uiHighlight: "rgba(255, 217, 134, 0.16)"
-  }
-];
-var boardSwatches = [...themePresets];
-var defaultLobbySettings = {
-  variant: "standard",
-  clockPreset: "untimed",
-  sideAssignment: "host_light",
-  takebackPolicy: "mutual",
-  assistPreset: "medium",
-  themePreset: "study",
-  boardSwatchId: "study",
-  piecePaletteId: "classic",
-  pieceSetId: "stevenalbert",
-  scenePresetId: "parlor",
-  cameraPreset: "cozy",
-  animationIntensity: "normal"
-};
-function getClockPreset(id) {
-  return clockPresets.find((preset) => preset.id === id) ?? clockPresets[0];
-}
-
 // node_modules/@badrap/result/dist/index.modern.mjs
 var r = class {
   unwrap(r2, t2) {
@@ -29127,6 +29002,159 @@ var ThreeCheck = class extends Position {
     return;
   }
 };
+
+// shared/src/presets.ts
+var clockPresets = [
+  { id: "untimed", label: "Untimed", initialMs: null, incrementMs: 0 },
+  { id: "5+0", label: "5 + 0", initialMs: 5 * 6e4, incrementMs: 0 },
+  { id: "10+0", label: "10 + 0", initialMs: 10 * 6e4, incrementMs: 0 },
+  { id: "10+5", label: "10 + 5", initialMs: 10 * 6e4, incrementMs: 5e3 },
+  { id: "15+10", label: "15 + 10", initialMs: 15 * 6e4, incrementMs: 1e4 }
+];
+var themePresets = [
+  {
+    id: "study",
+    name: "Warm Wood Study",
+    lightSquare: "#f1ddbc",
+    darkSquare: "#8a5e45",
+    border: "#3f291f",
+    innerBorder: "#8b654c",
+    tableTop: "#2f4338",
+    tableEdge: "#21150f",
+    felt: "#18251e",
+    accent: "#e5b368",
+    ambient: "#f8ecd7",
+    glow: "#ffdca1",
+    backgroundTop: "#31261f",
+    backgroundBottom: "#0f141d",
+    roomGlow: "#d58d52",
+    floor: "#151b22",
+    floorAccent: "#2c3c37",
+    uiBackground: "#0d1218",
+    uiPanel: "rgba(18, 23, 31, 0.76)",
+    uiPanelElevated: "rgba(28, 34, 43, 0.84)",
+    uiSurface: "rgba(12, 17, 24, 0.82)",
+    uiBorder: "rgba(255, 223, 177, 0.14)",
+    uiText: "#f6ecdc",
+    uiMuted: "#d8ccb7",
+    uiButton: "#efc57a",
+    uiButtonText: "#23170f",
+    uiSecondary: "rgba(255, 255, 255, 0.1)",
+    uiInput: "rgba(7, 11, 17, 0.72)",
+    uiShadow: "rgba(0, 0, 0, 0.42)",
+    uiHighlight: "rgba(255, 211, 138, 0.2)"
+  },
+  {
+    id: "neon",
+    name: "Neon Strategy",
+    lightSquare: "#b7f3ff",
+    darkSquare: "#26506a",
+    border: "#061422",
+    innerBorder: "#0f3144",
+    tableTop: "#081928",
+    tableEdge: "#030b11",
+    felt: "#091624",
+    accent: "#78ffd6",
+    ambient: "#17324a",
+    glow: "#8cfffc",
+    backgroundTop: "#071929",
+    backgroundBottom: "#02060d",
+    roomGlow: "#35d9ff",
+    floor: "#040b13",
+    floorAccent: "#102538",
+    uiBackground: "#040912",
+    uiPanel: "rgba(7, 16, 25, 0.8)",
+    uiPanelElevated: "rgba(11, 22, 35, 0.9)",
+    uiSurface: "rgba(5, 11, 19, 0.82)",
+    uiBorder: "rgba(136, 255, 244, 0.18)",
+    uiText: "#eafcff",
+    uiMuted: "#b7d9e0",
+    uiButton: "#7effdf",
+    uiButtonText: "#042019",
+    uiSecondary: "rgba(117, 219, 255, 0.1)",
+    uiInput: "rgba(3, 9, 16, 0.82)",
+    uiShadow: "rgba(0, 8, 18, 0.56)",
+    uiHighlight: "rgba(115, 255, 222, 0.18)"
+  },
+  {
+    id: "marble",
+    name: "Fantasy Marble",
+    lightSquare: "#f1e5da",
+    darkSquare: "#7a6172",
+    border: "#2d1f2b",
+    innerBorder: "#5a4052",
+    tableTop: "#4f2435",
+    tableEdge: "#27111c",
+    felt: "#3f1e2a",
+    accent: "#f6ce71",
+    ambient: "#f3d8cb",
+    glow: "#ffe7a8",
+    backgroundTop: "#281925",
+    backgroundBottom: "#0e1016",
+    roomGlow: "#f3b46e",
+    floor: "#161219",
+    floorAccent: "#372232",
+    uiBackground: "#0d1018",
+    uiPanel: "rgba(25, 20, 32, 0.8)",
+    uiPanelElevated: "rgba(36, 28, 45, 0.9)",
+    uiSurface: "rgba(18, 14, 24, 0.84)",
+    uiBorder: "rgba(255, 225, 168, 0.16)",
+    uiText: "#f7ece3",
+    uiMuted: "#d7c8c1",
+    uiButton: "#f0c86d",
+    uiButtonText: "#2a1707",
+    uiSecondary: "rgba(255, 255, 255, 0.08)",
+    uiInput: "rgba(12, 9, 18, 0.8)",
+    uiShadow: "rgba(0, 0, 0, 0.46)",
+    uiHighlight: "rgba(255, 217, 134, 0.16)"
+  }
+];
+var boardSwatches = [...themePresets];
+var pieceSets = [
+  {
+    id: "stevenalbert",
+    name: "Classic Tournament",
+    source: "stevenalbert/3d-chess-opengl",
+    license: "MIT",
+    assetType: "obj",
+    basePath: "/assets/pieces/stevenalbert",
+    files: {
+      pawn: "Pawn.obj",
+      rook: "Rook.obj",
+      knight: "Knight.obj",
+      bishop: "Bishop.obj",
+      queen: "Queen.obj",
+      king: "King.obj"
+    },
+    targetHeights: {
+      pawn: 0.88,
+      rook: 0.98,
+      knight: 1.08,
+      bishop: 1.14,
+      queen: 1.24,
+      king: 1.34
+    },
+    importRotation: [-Math.PI / 2, 0, 0],
+    rotationY: 0
+  }
+];
+var defaultLobbySettings = {
+  variant: "standard",
+  clockPreset: "untimed",
+  sideAssignment: "host_light",
+  takebackPolicy: "mutual",
+  assistPreset: "medium",
+  themePreset: "study",
+  boardSwatchId: "study",
+  piecePaletteId: "classic",
+  pieceSetId: "stevenalbert",
+  scenePresetId: "parlor",
+  cameraPreset: "cozy",
+  animationIntensity: "normal"
+};
+function getClockPreset(id) {
+  return clockPresets.find((preset) => preset.id === id) ?? clockPresets[0];
+}
 
 // shared/src/rules.ts
 function createChess960Setup(seed) {

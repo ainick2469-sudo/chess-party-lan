@@ -39,7 +39,26 @@ Latest verification
 - `npm test`
 - `npm run test:smoke`
 
+March 12 polish + solo mode notes
+- Fixed the imported OBJ chess pieces by rotating and normalizing the `stevenalbert` asset pack as a Z-up model set before scaling. Pieces now render as real meshes instead of pedestals/discs only.
+- Replaced the rigid auto camera with a smoother orbit rig: right mouse drag rotates, mouse wheel zooms, and scripted framing still eases into the current seat/focus square.
+- Added a local solo mode on the landing screen with 10 bot ranks, selectable side, selectable variant, and theme carry-through into the live match.
+- Added a shared bot search module with progressive difficulty settings, alpha-beta search, immediate win detection, and a bot sanity test for a forced mate-in-one.
+- Updated `render_game_to_text` to expose solo session state and bot thinking status, and kept the hosted smoke test green after the landing layout changed.
+
+Latest verification
+- `npx tsc --noEmit`
+- `npm test`
+- `npm run build:hosted`
+- `npm run test:smoke`
+- Manual browser verification at `http://127.0.0.1:3021`:
+  - confirmed imported pieces render
+  - confirmed right-click orbit + wheel zoom changes the board view
+  - confirmed solo move `e2e4` followed by a bot reply (`...e5`)
+
 Known follow-ups
 - Deploy the repo to Render and verify the public URL end-to-end with real remote clients.
 - Consider server-side persistence or shared storage before scaling beyond one Render instance.
 - Optional: add a clearer public-lobby status filter/sort UI if the lobby list gets busy.
+- Optional: move the bot search off the main thread if higher ranks ever feel too heavy on low-end machines.
+- Optional: make `window.debug_move` await the selected-square state transition internally so it can be used as a truly atomic test helper.

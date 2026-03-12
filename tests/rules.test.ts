@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyMoveToSnapshot, createInitialSnapshot, defaultLobbySettings, replayHistory } from '../shared/src';
+import { applyMoveToSnapshot, chooseBotMove, createInitialSnapshot, defaultLobbySettings, replayHistory } from '../shared/src';
 
 describe('shared rules adapter', () => {
   it('creates a standard opening position with legal pawn pushes', () => {
@@ -35,5 +35,16 @@ describe('shared rules adapter', () => {
 
     expect(replayed.fen).toBe(third.fen);
     expect(replayed.moveHistory).toEqual(third.moveHistory);
+  });
+
+  it('lets the strongest bot finish a forced mate in one', () => {
+    const first = createInitialSnapshot(defaultLobbySettings, 1);
+    const second = applyMoveToSnapshot(first, defaultLobbySettings, 'f2f3').snapshot;
+    const third = applyMoveToSnapshot(second, defaultLobbySettings, 'e7e5').snapshot;
+    const fourth = applyMoveToSnapshot(third, defaultLobbySettings, 'g2g4').snapshot;
+
+    const move = chooseBotMove(fourth, defaultLobbySettings, 10);
+
+    expect(move).toBe('d8h4');
   });
 });

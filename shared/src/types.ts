@@ -82,6 +82,7 @@ export interface PieceSet {
   basePath: string;
   files: Record<Role, string>;
   targetHeights: Record<Role, number>;
+  importRotation: [number, number, number];
   rotationY: number;
 }
 

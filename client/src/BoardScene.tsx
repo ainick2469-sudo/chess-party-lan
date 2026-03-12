@@ -1,12 +1,14 @@
-import { Suspense, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
-import { Text, useCursor } from '@react-three/drei';
+import { OrbitControls, Text, useCursor } from '@react-three/drei';
 import { Canvas, type ThreeEvent, useFrame, useLoader, useThree } from '@react-three/fiber';
 import type { Color, Role } from 'chessops/types';
 import {
   Box3,
   Color as ThreeColor,
+  DoubleSide,
   Group,
+  MOUSE,
   Mesh,
   MeshStandardMaterial,
   Object3D,
@@ -82,7 +84,12 @@ export function BoardScene({
   useCursor(Boolean(hoveredSquare) && interactive);
 
   return (
-    <Canvas shadows camera={{ position: [0, 6, 9], fov: cameraProfiles[cameraPreset].fov }} style={{ width: '100%', height: '100%' }}>
+    <Canvas
+      shadows
+      camera={{ position: [0, 6, 9], fov: cameraProfiles[cameraPreset].fov }}
+      style={{ width: '100%', height: '100%' }}
+      onContextMenu={(event) => event.preventDefault()}
+    >
       <color attach="background" args={[theme.backgroundBottom]} />
       <fog attach="fog" args={[scenePreset.fogColor, 14, 36]} />
       <CameraRig
@@ -190,32 +197,111 @@ function CameraRig({
   sceneMode: 'preview' | 'match';
   status: GameSnapshot['status'];
 }) {
-  const { camera } = useThree();
-  const lookAtRef = useRef(new Vector3(0, 0.15, 0));
-  const rig = cameraProfiles[cameraPreset];
+  const { camera, gl } = useThree();
+  const controlsRef = useRef<any>(null);
+  const isDraggingRef = useRef(false);
+  const animationRef = useRef({
+    ready: false,
+    active: false,
+    startedAt: 0,
+    durationMs: 620,
+    fromFov: cameraProfiles[cameraPreset].fov,
+    toFov: cameraProfiles[cameraPreset].fov,
+    fromPosition: new Vector3(),
+    toPosition: new Vector3(),
+    fromTarget: new Vector3(),
+    toTarget: new Vector3()
+  });
+  const desiredPose = useMemo(
+    () => buildCameraPose(cameraPreset, orientation, focusSquare, sceneMode, status),
+    [cameraPreset, focusSquare, orientation, sceneMode, status]
+  );
 
-  useFrame((_state, delta) => {
+  useEffect(() => {
+    const preventContextMenu = (event: MouseEvent) => event.preventDefault();
+    gl.domElement.addEventListener('contextmenu', preventContextMenu);
+    return () => gl.domElement.removeEventListener('contextmenu', preventContextMenu);
+  }, [gl]);
+
+  useEffect(() => {
     const perspective = camera as PerspectiveCamera;
-    const side = orientation === 'white' ? 1 : -1;
-    const focus = focusSquare ? boardPosition(focusSquare) : { x: 0, z: 0 };
-    const distance = sceneMode === 'preview' ? rig.distance * 1.18 : rig.distance;
-    const lift = status === 'active' ? 1 : 1.12;
-    const targetPosition = new Vector3(
-      side * -rig.lateral + focus.x * 0.12,
-      rig.height * lift,
-      side * distance + focus.z * 0.16
-    );
-    const targetLookAt = new Vector3(focus.x * 0.22, 0.28, focus.z * 0.16);
-    const lerpFactor = 1 - Math.exp(-delta * motion.speed);
+    const controls = controlsRef.current;
+    if (!controls) return;
 
-    perspective.fov += (rig.fov - perspective.fov) * lerpFactor;
-    perspective.position.lerp(targetPosition, lerpFactor);
-    lookAtRef.current.lerp(targetLookAt, lerpFactor);
-    perspective.lookAt(lookAtRef.current);
-    perspective.updateProjectionMatrix();
+    const nextPosition = desiredPose.position.clone();
+    const nextTarget = desiredPose.target.clone();
+
+    if (!animationRef.current.ready) {
+      perspective.position.copy(nextPosition);
+      perspective.fov = desiredPose.fov;
+      controls.target.copy(nextTarget);
+      controls.update();
+      perspective.updateProjectionMatrix();
+      animationRef.current.ready = true;
+      return;
+    }
+
+    animationRef.current.active = true;
+    animationRef.current.startedAt = performance.now();
+    animationRef.current.durationMs = sceneMode === 'preview' ? 760 : 580;
+    animationRef.current.fromFov = perspective.fov;
+    animationRef.current.toFov = desiredPose.fov;
+    animationRef.current.fromPosition = perspective.position.clone();
+    animationRef.current.toPosition = nextPosition;
+    animationRef.current.fromTarget = controls.target.clone();
+    animationRef.current.toTarget = nextTarget;
+  }, [camera, desiredPose, sceneMode]);
+
+  useFrame(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+
+    const perspective = camera as PerspectiveCamera;
+    if (animationRef.current.active && !isDraggingRef.current) {
+      const elapsed = Math.min(1, (performance.now() - animationRef.current.startedAt) / animationRef.current.durationMs);
+      const eased = easeOutCubic(elapsed);
+
+      perspective.position.lerpVectors(animationRef.current.fromPosition, animationRef.current.toPosition, eased);
+      perspective.fov = animationRef.current.fromFov + (animationRef.current.toFov - animationRef.current.fromFov) * eased;
+      controls.target.lerpVectors(animationRef.current.fromTarget, animationRef.current.toTarget, eased);
+      perspective.updateProjectionMatrix();
+
+      if (elapsed >= 1) {
+        animationRef.current.active = false;
+      }
+    }
+
+    controls.update();
   });
 
-  return null;
+  return (
+    <OrbitControls
+      ref={controlsRef}
+      enablePan={false}
+      enableDamping
+      dampingFactor={0.08}
+      rotateSpeed={0.84}
+      zoomSpeed={0.94}
+      minDistance={4.9}
+      maxDistance={14}
+      minPolarAngle={Math.PI / 5.2}
+      maxPolarAngle={Math.PI / 2.06}
+      mouseButtons={{
+        LEFT: undefined as never,
+        MIDDLE: MOUSE.DOLLY,
+        RIGHT: MOUSE.ROTATE
+      }}
+      onStart={() => {
+        isDraggingRef.current = true;
+        animationRef.current.active = false;
+      }}
+      onEnd={() => {
+        window.setTimeout(() => {
+          isDraggingRef.current = false;
+        }, 0);
+      }}
+    />
+  );
 }
 
 function RoomEnvironment({
@@ -430,7 +516,8 @@ function ImportedPieceModel({
           metalness: 0.3,
           roughness: 0.34,
           emissive: selected ? accentColor : '#000000',
-          emissiveIntensity: selected ? 0.16 : 0
+          emissiveIntensity: selected ? 0.16 : 0,
+          side: DoubleSide
         });
       }
     });
@@ -576,6 +663,10 @@ function usePieceTemplates(pieceSet: ReturnType<typeof getPieceSet>) {
     pieceRoles.forEach((role, index) => {
       const normalizedRoot = new Group();
       const source = loaded[index].clone(true);
+      source.rotation.set(...pieceSet.importRotation);
+      source.rotation.y += pieceSet.rotationY;
+      source.updateMatrixWorld(true);
+
       const bounds = new Box3().setFromObject(source);
       const size = bounds.getSize(new Vector3());
       const center = bounds.getCenter(new Vector3());
@@ -583,7 +674,7 @@ function usePieceTemplates(pieceSet: ReturnType<typeof getPieceSet>) {
 
       source.position.set(-center.x, -bounds.min.y, -center.z);
       source.scale.setScalar(scale);
-      source.rotation.y = pieceSet.rotationY;
+      source.updateMatrixWorld(true);
       normalizedRoot.add(source);
       mapped[role] = normalizedRoot;
     });
@@ -662,6 +753,36 @@ function boardPosition(square: string) {
     x: coords.file - 3.5,
     z: 3.5 - coords.rank
   };
+}
+
+function buildCameraPose(
+  cameraPreset: CameraPreset,
+  orientation: Color,
+  focusSquare: string | undefined,
+  sceneMode: 'preview' | 'match',
+  status: GameSnapshot['status']
+) {
+  const rig = cameraProfiles[cameraPreset];
+  const focus = focusSquare ? boardPosition(focusSquare) : { x: 0, z: 0 };
+  const side = orientation === 'white' ? 1 : -1;
+  const distance = sceneMode === 'preview' ? rig.distance * 1.18 : rig.distance;
+  const height = sceneMode === 'preview' ? rig.height * 1.08 : rig.height * (status === 'active' ? 1 : 1.1);
+  const position = new Vector3(
+    side * -rig.lateral + focus.x * 0.14,
+    height,
+    side * distance + focus.z * 0.18
+  );
+  const target = new Vector3(focus.x * 0.24, 0.32, focus.z * 0.18);
+
+  return {
+    position,
+    target,
+    fov: rig.fov
+  };
+}
+
+function easeOutCubic(value: number) {
+  return 1 - (1 - value) ** 3;
 }
 
 function squareToCoords(square: string) {
