@@ -30146,13 +30146,22 @@ function lobbySortWeight(lobby) {
 // server/src/index.ts
 var rootDir = process.cwd();
 var staticDir = resolveStaticDir(rootDir);
-var port = Number(process.env.PORT ?? 3e3);
+var basePort = Number(process.env.PORT ?? 3e3);
 var host = process.env.HOST ?? "0.0.0.0";
+var allowPortFallback = process.env.AUTO_INCREMENT_PORT === "1" && !process.env.RENDER;
+var maxPortFallbacks = 9;
 var app = (0, import_express.default)();
 var server = (0, import_node_http.createServer)(app);
 var wss = new import_websocket_server.default({ server });
 var rooms = new RoomManager();
 var lastHeartbeatAt = 0;
+var activePort = basePort;
+wss.on("error", (error) => {
+  if (error.code === "EADDRINUSE") {
+    return;
+  }
+  console.error("WebSocket server error:", error);
+});
 app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true });
 });
@@ -30197,20 +30206,7 @@ var interval = setInterval(() => {
     }
   }
 }, 250);
-server.listen(port, host, async () => {
-  const lanIp = detectLanIp();
-  const localUrl = `http://localhost:${port}`;
-  const lanUrl = lanIp ? `http://${lanIp}:${port}` : "LAN IP unavailable";
-  console.log("Chess Party server is live.");
-  console.log(`Local URL: ${localUrl}`);
-  if (lanIp) {
-    console.log(`LAN URL: ${lanUrl}`);
-  }
-  console.log("Open this site in a browser, create a public lobby, then share the 4-digit join PIN privately.");
-  if (process.env.NO_OPEN_BROWSER !== "1" && !process.env.RENDER) {
-    openBrowser(localUrl);
-  }
-});
+listenWithFallback(basePort);
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     clearInterval(interval);
@@ -30254,6 +30250,47 @@ function resolveStaticDir(rootDir2) {
     return clientDistDir;
   }
   return import_node_path.default.resolve(rootDir2, "dist");
+}
+function listenWithFallback(port) {
+  activePort = port;
+  server.once("listening", handleListening);
+  server.once("error", handleListenError);
+  server.listen(port, host);
+}
+function handleListenError(error) {
+  server.off("listening", handleListening);
+  server.off("error", handleListenError);
+  if (error.code === "EADDRINUSE" && allowPortFallback && activePort < basePort + maxPortFallbacks) {
+    const nextPort = activePort + 1;
+    console.log(`Port ${activePort} is already in use. Retrying on ${nextPort}...`);
+    listenWithFallback(nextPort);
+    return;
+  }
+  if (error.code === "EADDRINUSE") {
+    console.log(`Port ${activePort} is already in use.`);
+    console.log("Close the other Chess Party server window or launch this copy with a different PORT.");
+  }
+  throw error;
+}
+function handleListening() {
+  server.off("error", handleListenError);
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : activePort;
+  onServerReady(port);
+}
+function onServerReady(port) {
+  const lanIp = detectLanIp();
+  const localUrl = `http://localhost:${port}`;
+  const lanUrl = lanIp ? `http://${lanIp}:${port}` : "LAN IP unavailable";
+  console.log("Chess Party server is live.");
+  console.log(`Local URL: ${localUrl}`);
+  if (lanIp) {
+    console.log(`LAN URL: ${lanUrl}`);
+  }
+  console.log("Open this site in a browser, create a public lobby, then share the 4-digit join PIN privately.");
+  if (process.env.NO_OPEN_BROWSER !== "1" && !process.env.RENDER) {
+    openBrowser(localUrl);
+  }
 }
 function markSocketAlive(socket) {
   socket.isAlive = true;

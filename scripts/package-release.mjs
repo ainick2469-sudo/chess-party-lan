@@ -26,6 +26,7 @@ cd /d "%~dp0"
 set "NODE_ENV=production"
 set "STATIC_DIR=%~dp0www"
 set "PORT=3000"
+set "AUTO_INCREMENT_PORT=1"
 ".\\node\\node.exe" ".\\server\\index.cjs"
 pause
 `,
