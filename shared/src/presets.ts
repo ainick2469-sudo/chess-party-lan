@@ -1,3 +1,5 @@
+import type { Color, Role } from 'chessops/types';
+
 import type {
   BoardTheme,
   ClockPreset,
@@ -226,7 +228,10 @@ export const pieceSets: PieceSet[] = [
       king: 1.34
     },
     importRotation: [-Math.PI / 2, 0, 0],
-    rotationY: 0
+    rotationY: 0,
+    roleFacing: {
+      knight: 0
+    }
   }
 ];
 
@@ -234,32 +239,59 @@ export const scenePresets: ScenePreset[] = [
   {
     id: 'parlor',
     name: 'Parlor Glow',
+    environmentKind: 'salon',
     tableGlow: '#d3a066',
     fillLight: '#ffd8ac',
     rimLight: '#ffe7b9',
     fogColor: '#11161d',
-    wallColor: '#141b22',
-    wallAccent: '#3d2e25'
+    fogNear: 15,
+    fogFar: 42,
+    skyTop: '#6e4c37',
+    skyBottom: '#121923',
+    horizonGlow: '#e4b780',
+    floorColor: '#20140f',
+    architecturePrimary: '#4b3428',
+    architectureSecondary: '#8e6a4e',
+    windowGlow: '#f3ca94',
+    distantLight: '#f7dcbc'
   },
   {
     id: 'skyline',
     name: 'Skyline Loft',
+    environmentKind: 'rooftop',
     tableGlow: '#6fd6ff',
     fillLight: '#b4f2ff',
     rimLight: '#8fffe8',
     fogColor: '#070d16',
-    wallColor: '#0d1621',
-    wallAccent: '#143244'
+    fogNear: 16,
+    fogFar: 46,
+    skyTop: '#0a2440',
+    skyBottom: '#03070e',
+    horizonGlow: '#62edff',
+    floorColor: '#07111c',
+    architecturePrimary: '#0d1b28',
+    architectureSecondary: '#1e5978',
+    windowGlow: '#87fff4',
+    distantLight: '#5bc6ff'
   },
   {
     id: 'vault',
     name: 'Velvet Vault',
+    environmentKind: 'observatory',
     tableGlow: '#f0b26d',
     fillLight: '#ffd8b3',
     rimLight: '#ffe9ba',
     fogColor: '#110f17',
-    wallColor: '#16111a',
-    wallAccent: '#4b2737'
+    fogNear: 15,
+    fogFar: 44,
+    skyTop: '#23314b',
+    skyBottom: '#0d1118',
+    horizonGlow: '#f0c982',
+    floorColor: '#19161d',
+    architecturePrimary: '#d7cdc6',
+    architectureSecondary: '#8b715e',
+    windowGlow: '#ffe4b2',
+    distantLight: '#bcd5ff'
   }
 ];
 
@@ -309,4 +341,15 @@ export function getPieceSet(id: string): PieceSet {
 
 export function getScenePreset(id: string): ScenePreset {
   return scenePresets.find((scenePreset) => scenePreset.id === id) ?? scenePresets[0];
+}
+
+export function getPieceYaw(role: Role, color: Color, pieceSetOrId: PieceSet | string) {
+  const pieceSet = typeof pieceSetOrId === 'string' ? getPieceSet(pieceSetOrId) : pieceSetOrId;
+  const baseYaw = pieceSet.rotationY + (pieceSet.roleFacing?.[role] ?? 0);
+
+  if (role === 'knight') {
+    return baseYaw + (color === 'white' ? Math.PI : 0);
+  }
+
+  return baseYaw;
 }

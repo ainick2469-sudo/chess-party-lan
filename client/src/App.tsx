@@ -16,6 +16,9 @@ import {
   getBotDifficulty,
   getPieceGuideText,
   getPiecePalette,
+  getPieceSet,
+  getPieceYaw,
+  getScenePreset,
   getVariantDefinition,
   piecePalettes,
   pieceSets,
@@ -293,6 +296,10 @@ export function App() {
   }, [soloState?.botColor, soloState?.botDifficulty, soloState?.snapshot.fen, soloState?.snapshot.status, soloState?.snapshot.turn]);
 
   useEffect(() => {
+    const scenePreset = getScenePreset(activeSettings.scenePresetId);
+    const pieceSet = getPieceSet(activeSettings.pieceSetId);
+    const boardSceneDebug = (window as Window & { __boardSceneDebug?: Record<string, unknown> }).__boardSceneDebug ?? {};
+
     latestTextState.current = JSON.stringify({
       mode: sessionPhase ?? 'landing',
       sessionKind: soloState ? 'solo' : room ? 'online' : 'landing',
@@ -309,15 +316,36 @@ export function App() {
       status: sessionPhase === 'landing' ? null : currentSnapshot.status,
       clocks: sessionPhase === 'landing' ? null : currentSnapshot.clocks,
       boardTheme: activeSettings.boardSwatchId,
+      scenePresetId: activeSettings.scenePresetId,
+      selectedEnvironment: scenePreset.environmentKind,
+      sceneHasGlowOrb: false,
+      knightYaw: {
+        white: getPieceYaw('knight', 'white', pieceSet),
+        black: getPieceYaw('knight', 'black', pieceSet)
+      },
       fullscreenActive: isFullscreen,
       boardMessage,
       promptKind: prompt?.kind ?? null,
       botDifficulty: soloState?.botDifficulty ?? null,
       botThinking: soloState?.thinking ?? false,
+      orbitAzimuth: boardSceneDebug.orbitAzimuth ?? null,
+      orbitPolar: boardSceneDebug.orbitPolar ?? null,
       pieces: sessionPhase === 'landing' ? [] : currentSnapshot.pieces.map((piece) => `${piece.color[0]}:${piece.role}:${piece.square}`),
       legalMoves: selectedSquare && sessionPhase === 'playing' ? currentSnapshot.legalDestinations[selectedSquare] ?? [] : []
     });
-    window.render_game_to_text = () => latestTextState.current;
+    window.render_game_to_text = () => {
+      const liveSceneDebug = (window as Window & { __boardSceneDebug?: Record<string, unknown> }).__boardSceneDebug ?? {};
+      const baseState = JSON.parse(latestTextState.current) as Record<string, unknown>;
+
+      return JSON.stringify({
+        ...baseState,
+        scenePresetId: liveSceneDebug.scenePresetId ?? baseState.scenePresetId ?? null,
+        selectedEnvironment: liveSceneDebug.environmentKind ?? baseState.selectedEnvironment ?? null,
+        sceneHasGlowOrb: false,
+        orbitAzimuth: liveSceneDebug.orbitAzimuth ?? baseState.orbitAzimuth ?? null,
+        orbitPolar: liveSceneDebug.orbitPolar ?? baseState.orbitPolar ?? null
+      });
+    };
     window.advanceTime = (ms: number) => setAnimationMs((current) => current + ms);
     window.debug_click_square = (square: string) => handleSquareClick(square);
     window.debug_move = (from: string, to: string) => {
@@ -330,6 +358,8 @@ export function App() {
     window.debug_start_solo = (level?: number) => startSolo(level as BotDifficultyLevel | undefined);
   }, [
     activeSettings.boardSwatchId,
+    activeSettings.pieceSetId,
+    activeSettings.scenePresetId,
     activeSettings.variant,
     boardMessage,
     currentSnapshot,
@@ -1491,6 +1521,7 @@ function rotateVariant(current: VariantId): VariantId {
 
 declare global {
   interface Window {
+    __boardSceneDebug?: Record<string, unknown>;
     render_game_to_text: () => string;
     advanceTime: (ms: number) => void;
     debug_click_square: (square: string) => void;

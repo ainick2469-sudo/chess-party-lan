@@ -10,6 +10,7 @@ export type CameraPreset = 'cozy' | 'competitive' | 'dramatic';
 export type AnimationIntensity = 'reduced' | 'normal' | 'lively';
 export type PieceSetId = 'stevenalbert';
 export type ScenePresetId = 'parlor' | 'skyline' | 'vault';
+export type EnvironmentKind = 'salon' | 'rooftop' | 'observatory';
 export type RoomPhase = 'landing' | 'lobby' | 'playing' | 'finished';
 export type GameStatus = 'waiting' | 'active' | 'checkmate' | 'stalemate' | 'draw' | 'variant_win' | 'timeout';
 export type RematchOption = 'same' | 'swap' | 'next_variant';
@@ -84,17 +85,27 @@ export interface PieceSet {
   targetHeights: Record<Role, number>;
   importRotation: [number, number, number];
   rotationY: number;
+  roleFacing?: Partial<Record<Role, number>>;
 }
 
 export interface ScenePreset {
   id: ScenePresetId;
   name: string;
+  environmentKind: EnvironmentKind;
   tableGlow: string;
   fillLight: string;
   rimLight: string;
   fogColor: string;
-  wallColor: string;
-  wallAccent: string;
+  fogNear: number;
+  fogFar: number;
+  skyTop: string;
+  skyBottom: string;
+  horizonGlow: string;
+  floorColor: string;
+  architecturePrimary: string;
+  architectureSecondary: string;
+  windowGlow: string;
+  distantLight: string;
 }
 
 export interface ClockPreset {

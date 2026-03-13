@@ -9,6 +9,36 @@ test('landing layout keeps solo mode usable at desktop height', async ({ page })
 
   await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).sessionKind).toBe('solo');
   await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).mode).toBe('playing');
+  await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).scenePresetId).toBe('parlor');
+  await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).selectedEnvironment).toBe('salon');
+  await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).sceneHasGlowOrb).toBe(false);
+  await expect
+    .poll(async () => {
+      const textState = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
+      return textState.knightYaw.white !== textState.knightYaw.black;
+    })
+    .toBe(true);
+
+  await dismissFullscreenPrompt(page);
+  const canvas = page.locator('.board-canvas canvas').first();
+  await expect(canvas).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath('scene-overhaul-solo.png'), fullPage: false });
+
+  await expect
+    .poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).orbitAzimuth)
+    .not.toBeNull();
+  const beforeAzimuth = JSON.parse(await page.evaluate(() => window.render_game_to_text())).orbitAzimuth as number;
+
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error('Board canvas bounding box was not available.');
+  await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.5);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(box.x + box.width * 0.72, box.y + box.height * 0.42, { steps: 12 });
+  await page.mouse.up({ button: 'right' });
+
+  await expect
+    .poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).orbitAzimuth)
+    .not.toBe(beforeAzimuth);
 });
 
 test('public lobby flow supports join pin, reconnect, theme sync, and checkmate', async ({ browser, page }) => {

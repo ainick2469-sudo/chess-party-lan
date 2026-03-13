@@ -29135,7 +29135,10 @@ var pieceSets = [
       king: 1.34
     },
     importRotation: [-Math.PI / 2, 0, 0],
-    rotationY: 0
+    rotationY: 0,
+    roleFacing: {
+      knight: 0
+    }
   }
 ];
 var defaultLobbySettings = {

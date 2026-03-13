@@ -72,3 +72,21 @@ Latest verification
 - `npm test`
 - `npm run build:hosted`
 - `npm run test:smoke`
+
+March 13 scene overhaul notes
+- Fixed piece-facing logic so knights now use deterministic role/color yaw in the render layer instead of only a shared import rotation. White knights face into black's side and black knights face into white's side in both imported and fallback rendering.
+- Removed the placeholder glow sphere from the board scene entirely.
+- Rebuilt the environment system from a flat back-wall room into three procedural 360 worlds:
+  - `parlor` / `salon`: circular walnut study with window bays, shelves, and warm city lights
+  - `skyline` / `rooftop`: neon lounge with glass ring, light fins, and distant skyline silhouettes
+  - `vault` / `observatory`: marble observatory/temple with column ring, cliff silhouettes, and open sky
+- Expanded `ScenePreset` with environment tokens so theme worlds are data-driven instead of hardcoded wall colors.
+- Added scene debug telemetry to `render_game_to_text`, including scene preset, selected environment, live orbit angles, no-glow-orb state, and sampled knight yaw values for test coverage.
+- Extended smoke coverage so solo mode now verifies the scene preset, environment identity, no-orb flag, knight yaw divergence, screenshot capture, and right-drag orbit updates.
+
+Latest verification
+- `node node_modules/typescript/bin/tsc --noEmit`
+- `node node_modules/vitest/vitest.mjs run tests/rules.test.ts`
+- `node node_modules/vite/bin/vite.js build --config client/vite.config.ts`
+- `node scripts/build-server.mjs`
+- `node node_modules/@playwright/test/cli.js test --config tests/playwright.config.ts`
