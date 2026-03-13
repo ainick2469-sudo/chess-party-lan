@@ -785,7 +785,7 @@ export function App() {
             <p className="support-copy">{getBotDifficulty(soloDifficulty).summary}</p>
           </article>
 
-          <article className="panel panel--wide landing-guide">
+          <article className="panel landing-guide">
             <div className="panel-title-row">
               <div>
                 <h2>How This Works</h2>

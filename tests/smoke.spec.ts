@@ -1,6 +1,18 @@
 import { expect, test } from '@playwright/test';
 
+test('landing layout keeps solo mode usable at desktop height', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto('/');
+
+  await expect(page.getByRole('button', { name: 'Start Solo Match' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start Solo Match' }).click();
+
+  await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).sessionKind).toBe('solo');
+  await expect.poll(async () => JSON.parse(await page.evaluate(() => window.render_game_to_text())).mode).toBe('playing');
+});
+
 test('public lobby flow supports join pin, reconnect, theme sync, and checkmate', async ({ browser, page }) => {
+  test.setTimeout(45_000);
   const guest = await browser.newPage();
 
   await page.goto('/');

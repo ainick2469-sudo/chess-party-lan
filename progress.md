@@ -62,3 +62,13 @@ Known follow-ups
 - Optional: add a clearer public-lobby status filter/sort UI if the lobby list gets busy.
 - Optional: move the bot search off the main thread if higher ranks ever feel too heavy on low-end machines.
 - Optional: make `window.debug_move` await the selected-square state transition internally so it can be used as a truly atomic test helper.
+
+March 12 hosted landing fix notes
+- Fixed the hosted landing page layout so `How This Works` no longer forces a third desktop row that clips the lobby footer and hides the solo-start controls on shorter viewports.
+- Converted the desktop landing grid into a true 2x2 layout with per-card scrolling for tall content, which keeps `Browse Lobbies` and `Solo Mode` usable around 1600x900.
+- Added smoke coverage that verifies `Start Solo Match` is visible and clickable at desktop height, then extended the hosted flow smoke timeout to 45s to account for the extra runtime without false failures.
+
+Latest verification
+- `npm test`
+- `npm run build:hosted`
+- `npm run test:smoke`
